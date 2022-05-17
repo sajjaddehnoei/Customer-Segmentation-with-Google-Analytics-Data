@@ -1,0 +1,224 @@
+---
+title: "Consumer Profiles"
+author: "Sajjad"
+date: "5/14/2022"
+params:
+  justContext: FALSE
+  site: "ALL"
+  season: "ALL"
+  newstuff: TRUE
+  statusReport: FALSE
+  incomplete: FALSE
+output: html_document
+---
+
+```{r setup, echo=FALSE}
+knitr::opts_chunk$set(echo=FALSE,comment="##",fig.width=15, fig.height=6.5,dpi=2*72, warning=F)
+options(dplyr.summarise.inform = FALSE)
+```
+
+```{r SetOutputDirectory}
+# This is necessary for knit_child to work properly when using "Run" in RStudio
+knitr::opts_knit$set(output.dir = ".")
+options(knitr.duplicate.label = 'allow')
+```
+
+```{r -------DataPreparation, include=FALSE}
+output <- knitr::knit_child(paste0(here::here(), "/Analysis/prepareData.Rmd"))
+```
+
+After completing the cleaning and exploratory data analysis in _prepareData_ and _assessment_ documents, here I explain the modelling steps that I took for creating customer profiles.
+
+# Consumer Profiles
+The goal of customer profiling is to categorize customers into meaningful classes. Customers in each class should share some characteristic and more importantly a specific behaviour. Our business goal is to map each customer class to a policy that help enhance business revenue.
+
+# Variable selection using Lasso regression
+This is a large dataset. I need to reduce the number of variables in the model before doing the analysis because first, having too many variables in the model will cause the analysis to lose its interpretability and second, the model can become very heavy and hard to run and handle in a reasonable time.
+
+Here I've used a LASSO Regression with 10-fold cross validation to choose variables for the model. I consider variables in 3 groups, marketing information, demographic information, and time and date information. The first group of variables are coming from google analytics:
+
+## Google Analytics Information
+Here we have {campaign, Whether the customer came to the website directly, number of visits for that customer, is the customer using mobile, number of hits by customer, number of pages viewed by the customer, whether it's a new visit or not, and the medium through which the customer accessed the online store}. The outcome ofcourse is transaction revenue.
+```{r lassoRegression__1}
+# using package glmnet for a LASSO regression with a 10-fold cross validation.
+set.seed(432)
+lrData <- train %>%
+  select(campaign, isTrueDirect,  visitNumber, isMobile, hits,  pageviews,  
+         newVisits, medium, transactionRevenue)
+y = lrData$transactionRevenue
+x = data.matrix(lrData[,-9]) 
+
+lrModel <- cv.glmnet(x, y, alpha = 1) # best lambda: lrModel$lambda.min
+lrBestModel <- glmnet(x, y, alpha = 1, lambda = lrModel$lambda.min)
+coef(lrBestModel)
+```
+The model suggests that we don't use campaing and pageViews variables in the analysis as it sets their coefficient to 0.
+
+## Demographic Information
+Including {region, city, and metropolitan area}.
+```{r lassoRegression__2, eval=F}
+set.seed(432)
+lrData <- train %>%
+  select(region, city, metro, transactionRevenue)
+
+y = lrData$transactionRevenue
+x = data.matrix(lrData[,-4]) 
+
+lrModel <- cv.glmnet(x, y, alpha = 1) # best lambda: lrModel$lambda.min
+lrBestModel <- glmnet(x, y, alpha = 1, lambda = lrModel$lambda.min)
+coef(lrBestModel)
+```
+
+The model suggest removing all of the demographic variables.
+
+## Time and Date Data
+{month, year, day of week, and time of visit}.
+```{r lassoRegression__3}
+set.seed(432)
+lrData <- train %>%
+  select(month, year, weekDay, visitTimeOfDay, transactionRevenue)
+
+y = lrData$transactionRevenue
+x = data.matrix(lrData[,-5]) 
+
+lrModel <- cv.glmnet(x, y, alpha = 1) # best lambda: lrModel$lambda.min
+lrBestModel <- glmnet(x, y, alpha = 1, lambda = lrModel$lambda.min)
+coef(lrBestModel)
+```
+Model suggest keeping visitTimeOfDay but nothing else.
+
+# K-means clustering
+I used K-means clustering to create clusters for our consumers. This is because, K-means generates exclusive sets and we want each customer to belong to exactly one group. I was also interested in comparing groups together to find groups that are close the buyers. K-means use Euclidean distances which makes comparison between groups possible. Also, the dataset has nearly 1000000 records. Therefore, run time could be problematic. 
+
+We need to prepare data for the kmeans model before running it. Below I change the type of categorical variables to numeric.
+```{r kmeansData}
+kmeansData <- train %>%
+  select(fullVisitorId, isTrueDirect,  visitNumber, isMobile, hits,  
+         newVisits, medium, transactionRevenue, visitTimeOfDay, 
+         transactionRevenue) %>%
+  mutate(isTrueDirect = as.numeric(isTrueDirect)) %>%
+  mutate(isMobile = if_else(isMobile == T, 1, 0)) %>%
+  mutate(newVisits = if_else(newVisits == T, 1, 0)) %>%
+  mutate(isOrganic = if_else(medium == "organic", 1, 0),
+         isReferral = if_else(medium == "referral", 1, 0),
+         isCPC = if_else(medium == "cpc", 1, 0),
+         isAffiliate = if_else(medium == "affiliate", 1, 0),
+         isCPM = if_else(medium == "cpm", 1, 0),
+         isDirect = if_else(medium == "direct", 1, 0)) %>%
+  mutate(isNight = if_else(visitTimeOfDay == "Night", 1, 0),
+         isEvening = if_else(visitTimeOfDay == "Evening", 1, 0),
+         isMorning = if_else(visitTimeOfDay == "Morning", 1, 0)) %>%
+  mutate(totalRevenue = if_else(transactionRevenue == 0 | 
+                                  is.na(transactionRevenue), 0, 
+                                log(transactionRevenue))) %>%
+  select(-medium, -visitTimeOfDay, -transactionRevenue)
+```
+
+I also scale and preprocess numeric values using preProcess function.
+```{r kmeansNormalize}
+preProcessed <- preProcess(kmeansData %>% select(-fullVisitorId), 
+                                 method = c("center", "scale"))
+
+kmeansDataPreProcessed <- predict(preProcessed, 
+                                  kmeansData %>% select(-fullVisitorId))
+```
+
+Here I run K-means clustering to find 3 customer clusters.
+```{r kmeansModel}
+set.seed(133)
+kmeansModel <- kmeans(kmeansDataPreProcessed, centers = 3, nstart = 25)
+kmeansModel$centers
+```
+
+# Customer Profiles
+* The K-means model categroizes customers into 3 categories:
+
+## Group 1 - Buyers:
+They brought revenue to the company. These are less than 1.5 % of our customers who visited the store and bought something online. The K-means model points that these customer on average: 
+* they were more likely to be _directed to the website_. 
+* more likely to use a _desktop_ computer instead of a mobile phone. 
+* more likely to have had _previous visits_ to the store.
+* have _more hitts_ than the average.
+* more likley to come from a _referral_ medium. 
+* slightly more likely to come from _cost per click_ or _cost per impression_ channels.
+* more likely to shop in the _morning or evening_ and less likely to shop at night.
+
+
+## Group 2 - Potential Buyers:
+The second group of customers did not end up buying anything but based on the
+model they have the closest behaviour to the buyers. Here's what we know 
+about them:
+* they were _slighly_ more likely to be _directed to the website_. 
+* _slighly_ more likely to use a _desktop_ computer instead of a mobile phone. 
+* _slighly_ more likely to have had _previous visits_ to the store.
+* had _fewer hits_ than the average.
+* _less_ likley to come from a _referral_ but 
+* _slightly_ more likely to come from an _organic_ or _direct_ source.
+* _slightly_ more likely to shop in the _morning_ or _evening_ .
+
+These are the ones who wanted to buy something but didn't buy anything. Maybe some of them changed their mind or maybe some went to the other stores. This is important for us to _keep_ them on our website. Perhaps investing more in cost per click or cost per impression channels. Or maybe changing the desing of the website, especially where they spent time on, can be helpful to turn them to buyers. 
+
+## Group 3 - Window Shoppers:
+The last group of customers did not buy anything from the store. I call them window shoppers. Out goal should be to direct them towards the second group. These were also the group with highest Euclidean distance from the buyers. On average:
+* they were _less likely to be directed_ to the website. 
+* _less_ likely to use a _desktop_ computer and more likely to use  a mobile phone. 
+* _less_ likely to have had _previous visits_ to the store.
+* had _fewer hits_ than the average.
+* _more_ likely to shop in the _evening_ or _night_.
+Perhaps this last group didn't want to buy anything but just happened to check the website. I believe these last group should be targeted by advertisement and marketing campaigns beyond our store or social media, so that we can first turn them potential buyers and then direct them towards buying something from our store.
+
+# plot clusters
+Some cleaning for plotting customer clusters.
+```{r}
+train$cluster <- kmeansModel$cluster
+
+train <- train %>%
+  mutate(cluster = case_when(
+    cluster == 1 ~ "Window Shoppers",
+    cluster == 2 ~ "Potential Buyers",
+    cluster == 3 ~ "Buyers")) %>%
+  mutate(isCA = factor(if_else(str_detect(metro, "CA") | is.na(metro), 0, 1)))
+```
+
+Here's a graph that shows the total number of customers in each group.
+```{r}
+train %>%
+  group_by(cluster) %>%
+  summarise(n=n()) %>%
+  ggplot(aes(x = cluster , y = n, fill = cluster))+
+  geom_bar(stat = "identity")+
+  geom_text(aes(x = cluster, y = n, 
+                label = paste0(round(n/sum(n)*100, 2), "%")), hjust = -0.25)+
+  coord_flip()+
+  scale_fill_brewer(palette = "Accent")+
+  labs(x = "Customer Groups", y = "")+
+  theme_light()
+
+ggsave("customerGroupsTotal.png")
+```
+
+And here we can how each customer group varies across each medium. 
+```{r}
+train %>%
+  mutate(medium = case_when(
+    medium == "affiliate" ~ "Affiliate",
+    medium == "cpc" ~ "Cost per Click",
+    medium == "cpm" ~ "Cost per Impresiion",
+    medium == "direct" ~ "Direct",
+    medium == "organic" ~ "Organic",
+    medium == "referral" ~ "Referral")) %>%
+  ggplot(aes(x = visitNumber, y = transactionRevenue, color = cluster))+
+  geom_jitter()+
+  facet_wrap(~medium)+
+  scale_color_brewer(palette = "Accent")+
+  labs(x = "Number of visits", y = "Total Revenue")+
+  theme_light()
+
+ggsave("customerGroupsBYMedium.png")
+```
++ We can see that many customers from the referral channel ended up being in the buyers group but they were likely came through a referral and probably cost us some money in forms of referral bonus. The average cost of referral bonus for us should be`r mean(train$transactionRevenue[train$medium == "referral"])` no less than this. This is the average money each referral customer spent. One can design an optimization model using linear programming to find the optimize cost of referral considering profit and other constraint.
+
++ We can also see a lot of potential buyers in the organice group. Investing in busines models such as search engine optimization or targeted ads can help these potential buyers to become actual buyers.
+
++ I would recommend some more investment in affiliate, cost per impression, and cost per click sections as there is room for improvement in these areas. 
+

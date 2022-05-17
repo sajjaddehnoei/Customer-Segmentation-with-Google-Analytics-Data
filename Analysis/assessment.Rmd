@@ -1,0 +1,214 @@
+---
+title: "Data Assessment"
+author: "Sajjad"
+date: "5/14/2022"
+params:
+  justContext: FALSE
+  site: "ALL"
+  season: "ALL"
+  newstuff: TRUE
+  statusReport: FALSE
+  incomplete: FALSE
+output: html_document
+---
+
+```{r setup, echo=FALSE}
+knitr::opts_chunk$set(echo=T,comment="##",fig.width=9.5,fig.height=6.5,dpi=2*72, warning=F)
+options(dplyr.summarise.inform = FALSE)
+```
+
+```{r SetOutputDirectory}
+# This is necessary for knit_child to work properly when using "Run" in RStudio
+knitr::opts_knit$set(output.dir = ".")
+options(knitr.duplicate.label = 'allow')
+```
+
+```{r -------DataPreparation, include=FALSE}
+output <- knitr::knit_child(paste0(here::here(), "/Analysis/prepareData.Rmd"))
+```
+
+
+This file represents my data assessment process before starting the analysis. This file will not presented to the clients and will not be used for any reporting purposes, this is only for me to see the variables mostly to find insights for modeling in the next steps.
+
+# Buying Customers
+It's important for us to know what portion of our customers end up purchasing something from the store. From Paretp principal we anticipate that most of our clients do not buy anything and that actually the majority of our revenue come from a small portion of our clients. Let's do some cleaning first and then look at our store's customers and revenue.
+```{r }
+# creating logRevenue variable for better scaling.
+df <- train %>%
+  select(fullVisitorId, transactionRevenue) %>%
+  group_by(fullVisitorId) %>%
+  summarize(totalRevenue = sum(transactionRevenue),
+            frequency = n()) %>%
+  mutate(logRevenue = if_else(totalRevenue == 0, 0, log(totalRevenue)))
+```
+
+```{r}
+df %>% 
+  mutate(buyTrue = if_else(logRevenue == 0, "No", "Yes")) %>%
+  group_by(buyTrue) %>%
+  summarise(n = n()) %>%
+  mutate(p = round(n/sum(n)*100, 2),
+         l = paste0(round(n/sum(n)*100, 2), "%")) %>%
+  ggplot(aes(x = buyTrue, y = p, fill = buyTrue)) +
+  geom_bar(stat = "identity")+
+  geom_text(aes(x = buyTrue, y = p, label = l), 
+            position = position_dodge(width = 1),vjust = -0.5, size = 5)+
+  xlab("Did the customer buy anything?")+
+  ylab("")+
+  guides(fill="none")+
+  scale_fill_brewer(palette = "RdYlBu")+
+  theme_light()
+
+  ggsave("buyersVSOthers.png")
+```
+
+As we can see, only 1.4 % of customers end up buying something. Our goal should be to move as many people as possible to the _buyers_ group and also have the current buyers remain in there and even buy more products.
+
+# Transaction Revenue
+Out of our current buyers the majority of them completed the purchases in less than three visits.
+```{r}
+df %>% 
+  ggplot(aes(x=frequency, logRevenue)) +
+  geom_jitter()+
+  labs(x = "Number of Visits", y = "Total Revenue (log revenue)")+
+  scale_fill_brewer(palette = "RdYlBu")+
+  theme_light()
+
+
+ggsave("revenueVSVisits.png")
+```
+
+# Pareto Analysis
+
+```{r paretoCleaning}
+paretoData <- df %>%
+  arrange(totalRevenue) %>%
+  mutate(cumLogRevenue = cumsum(totalRevenue),
+         cumPercentLogRevenue = cumLogRevenue/sum(df$totalRevenue),
+         visitorFlag = 1,
+         visitorFlag = ifelse(totalRevenue != 0, row_number(), cumsum(visitorFlag))) %>%
+  group_by(visitorFlag) %>%
+  summarise(revenuePercent = sum(cumPercentLogRevenue)) %>%
+  mutate(visitorPercent = visitorFlag/nrow(df)) %>%
+  filter(visitorFlag != 0)
+```
+
+```{r paretoPlot}
+paretoData %>%
+  ggplot(aes(visitorPercent,revenuePercent))+
+  geom_line()+
+  xlab("% Customers")+ylab("%Revenue")
+```
+
+As anticipated our Pareto chart shows that a very low number of customers contribute to the majority of our revenue. This signals the importance of having special attention to this limited group and at the same time, try to increase this portion.
+
+# Customer features
+Now let's see different features of the customers:
+
+I have defined the jitterPloter function below to quickly see the jitter plot we saw before for all varaibles in the dataset. This gives me a better understanding of each variable.
+```{r jitterPlotter}
+jitterPlotter <- function(feature){
+  feature <- enquo(feature)
+  df %>%
+  left_join(train %>% select(fullVisitorId, !!feature), 
+            by = c("fullVisitorId" = "fullVisitorId")) %>%
+  ggplot(aes(x=frequency, logRevenue, color=!!feature)) +
+  geom_jitter()+
+  labs(x = "Number of Visits", y = "Total Revenue (log revenu)")
+}
+```
+
+## Marketing Information
+
+### The channel via which the user came to the Store.
+We can see many referrals and paid searches but not too many socials.
+```{r}
+jitterPlotter(channelGrouping) 
+```
+
+###  The source that were used to access the Store.
+Manay comming from google sources but there are other 
+```{r}
+jitterPlotter(source) 
+```
+
+### newVisits 
+```{r}
+jitterPlotter(newVisits)
+```
+
+### medium 
+Many referral and organic mediums. Not too many affiliates.
+```{r}
+jitterPlotter(medium)
+```
+
+### operatingSystem 
+```{r}
+jitterPlotter(operatingSystem)
+```
+
+###  deviceCategory
+```{r}
+jitterPlotter(deviceCategory)
+```
+
+###  isMobile
+```{r}
+jitterPlotter(isMobile)
+```
+
+## Demographic Information
+
+###  continent
+Almost all out consumers were in the Americas with only a few in Europe.
+```{r}
+jitterPlotter(continent)
+```
+
+### country
+Furhter look at the country shows that almost all our clients were from the US with a few from Canada.
+```{r}
+df %>%
+  left_join(train %>% select(fullVisitorId, continent, country), 
+            by = c("fullVisitorId" = "fullVisitorId")) %>%
+  filter(continent == "Americas") %>%
+  ggplot(aes(x=frequency, y = logRevenue, color=country)) +
+  geom_jitter()+
+  labs(x = "Number of Visits", y = "Total Revenue (log revenu)")
+```
+
+### Metro Area
+Some patterns of more buying customers shopping from California counties. This partly makes sense as the population of CA is higher that the other states and partly because average income is more than the other states.
+```{r}
+jitterPlotter(metro)
+```
+
+## Time Variables
+Here we look at month, day of the week, and whether the purchase took place in the morning, evening, or at night.
+
+### Month
+```{r}
+df %>%
+  left_join(train %>% select(fullVisitorId, month), 
+            by = c("fullVisitorId" = "fullVisitorId")) %>%
+  ggplot(aes(x=month, y=logRevenue, color=month)) +
+  geom_bar(stat = "identity")+
+  labs(x = "month", y = "Total Revenue (log revenu)")
+```
+
+### Day of the week
+```{r}
+df %>%
+  left_join(train %>% select(fullVisitorId, weekDay), 
+            by = c("fullVisitorId" = "fullVisitorId")) %>%
+  ggplot(aes(x=weekDay, y=logRevenue, color=weekDay)) +
+  geom_bar(stat = "identity")+
+  labs(x = "weekDay", y = "Total Revenue (log revenu)")
+```
+
+### Time of the day
+We can see from the chart that visits that were started in the morning are more likely to end up purchasing something.
+```{r}
+jitterPlotter(visitTimeOfDay)
+```

@@ -1,0 +1,104 @@
+---
+title: "Sales Trends and Forecast"
+author: "Sajjad"
+date: "5/14/2022"
+params:
+  justContext: FALSE
+  site: "ALL"
+  season: "ALL"
+  newstuff: TRUE
+  statusReport: FALSE
+  incomplete: FALSE
+output: html_document
+---
+
+```{r setup, echo=FALSE}
+knitr::opts_chunk$set(echo=FALSE,comment="##",fig.width=15, fig.height=6.5,dpi=2*72, warning=F)
+options(dplyr.summarise.inform = FALSE)
+```
+
+```{r SetOutputDirectory}
+# This is necessary for knit_child to work properly when using "Run" in RStudio
+knitr::opts_knit$set(output.dir = ".")
+options(knitr.duplicate.label = 'allow')
+```
+
+```{r, include=FALSE}
+output <- knitr::knit_child(paste0(here::here(), "/Analysis/prepareData.Rmd"))
+```
+
+In this document I look at the sales trends over time.  
+```{r}
+library(fpp2)
+```
+
+
+# Sales Trends
+```{r}
+trends <- train %>%
+  select(fullVisitorId, date, month, weekDay, transactionRevenue, year, 
+         visitTimeOfDay)
+```
+
+# Time series analysis
+```{r}
+ts <- train %>%
+  mutate(transactionRevenue = if_else(is.na(transactionRevenue), 0,
+                                      as.numeric(transactionRevenue))) %>%
+  group_by(date) %>%
+  summarise(sales = sum(transactionRevenue)) %>%
+  mutate(sales = if_else(sales == 0, 0, log(sales)))
+```
+
+```{r}
+ts <- ts(ts$sales, start = c(2016, yday("2016-08-01")), 
+         end=c(2017, yday("2017-08-01	")), frequency = 365)
+```
+
+```{r}
+ggtsdisplay(ts, plot.type = "histogram",smooth = T)
+
+```
+
+We can see from the plot that there's no sales on day "2016-08-03", which is 
+unusual so let's just impute this value with the mean days before and after it.
+
+```{r}
+ts <- train %>%
+  mutate(transactionRevenue = if_else(is.na(transactionRevenue), 0,
+                                      as.numeric(transactionRevenue))) %>%
+  group_by(date) %>%
+  summarise(sales = sum(transactionRevenue)) %>%
+  mutate(sales = if_else(sales == 0, 0, log(sales)))
+
+ts$sales[ts$date == "2016-08-03"] <- mean(ts$sales[ts$date == "2016-08-02"],
+                                           ts$sales[ts$date == "2016-08-04"])
+```
+
+```{r}
+ts <- ts(ts$sales, start = c(2016, yday("2016-08-01")), 
+         end=c(2017, yday("2017-08-01")), frequency = 365)
+```
+
+```{r}
+ggtsdisplay(ts, plot.type = "partial",smooth = T)
+```
+
+Now the ts looks much better. HEre's the insights from it:
+
++ Overal the series looks steady around the mean.
++ We have huge lag 1, 2, and 3. Every day's sales is positively correlated with the day before
+same day from last week and is negatively correlated with 2 days ago.
++ We can observe a huge weekly pattern.
++ There are few drops in the sales that needs further investigation: mid 2016, beginning of 2017, 2017.
+
+
+## ARIMA Forecast
+```{r arima}
+model <- auto.arima(ts)
+forecast <- forecast(model, h=30)
+```
+
+```{r}
+autoplot(forecast)
+```

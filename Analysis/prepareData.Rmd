@@ -1,0 +1,262 @@
+---
+title: "Data Preparation"
+author: "Sajjad Dehnoei"
+date: '2022-04-01'
+params:
+  justContext: FALSE
+  site: "ALL"
+  season: "ALL"
+  newstuff: TRUE
+  statusReport: FALSE
+  incomplete: FALSE
+output: html_document
+---
+
+```{r setup, echo=FALSE}
+knitr::opts_chunk$set(echo=T,comment="##",fig.width=9.5,fig.height=6.5,dpi=2*72, warning=F)
+```
+
+This markdown document explains my data cleaning and preparation procecess for this case study. This is usually the first step for me in a project. I will use the output of this module (the cleaned dataset), in the other files. 
+
+I've briefly explained about each chunk of code right next to it.
+
+# Libraries
+```{r, message=FALSE,warning=FALSE}
+library(tidyverse)
+library(jsonlite)
+library(here)
+library(rmarkdown)
+library(qcc)
+library(RColorBrewer)
+library(table1)
+library(lubridate)
+library(caret)
+library(glmnet)
+```
+
+# Importing Data
+```{r}
+train <- read_csv(paste0(here(), "/Data/train.csv"))
+```
+
+# Convert Jsons
+Here I've converted the 4 columns that are in form of JSON queries. These are each converted to a data frame and are then binded with the train dataset.
+```{r JSON__1}
+devices <- fromJSON(paste("[", 
+                          paste(as.character(train$device), collapse = ","), 
+                          "]"))
+geoNetworks <- fromJSON(paste("[", 
+                              paste(as.character(train$geoNetwork), collapse = ","), 
+                              "]"))
+totals <- fromJSON(paste("[", 
+                              paste(as.character(train$totals), collapse = ","), 
+                              "]"))
+trafficSource <- fromJSON(paste("[", 
+                              paste(as.character(train$trafficSource), collapse = ","), 
+                              "]"))
+```
+
+```{r JSON__2}
+train <- train %>%
+  cbind(devices, geoNetworks, totals, trafficSource) %>%
+  select(-device, -geoNetwork, -totals, -trafficSource) %>%
+  select(-adwordsClickInfo)
+```
+
+# Transaction Revenue 
+Ther are a lot of missing values for the transaction Revenue variable. These are the visits that did not end up purchasing anything. As we want to treat this as a numeric variable, I change the NAs to 0.
+```{r transactionRevenue}
+train <- train %>%
+# this is to convert NA sales to 0. 
+  mutate(transactionRevenue = if_else(is.na(transactionRevenue), 0,
+                                      as.numeric(transactionRevenue))) 
+```
+
+# Data cleaning
+I looked at all of the variables, they mostly look clean. I  this is due to the fact that the source of data is google. But still some of the variables need cleaning:
+
+## campaingCode
+Consider the unique values for campaignCode:
+```{r }
+unique(train$campaignCode) 
+```
+"11251kjhkvahf" doesn't seem like a valid campaign code to me. In a real world 
+problem, I would f/u w/ the team about it but here I would just remove it 
+as there's actually only 1 of it in the entire data set.
+
+```{r}
+train <- train %>% select(-campaignCode)
+```
+
+## referralPath
+referral paths are a set of urls that were used by customers to access the store. In a real setting, I would reach out to the owner of the data (probably the web store back end team) for a decoder data dictionairy and replace these nearly 1500 codes with their categories. There are also other ways of analyzing this path such as [this one](https://www.kaggle.com/code/mrknoot/gstore-crafting-models-manual-features-xgb#eda) 
+but for the purpose of this case study let's just remove it.
+```{r}
+train <- train %>% select(-referralPath)
+```
+
+## visits
+visits has a value of 1 for all rows. This means that there's no information in it for us. So, I would just remove it from the dataset. In a real project, this would also be something for me to follow up about with the team.
+```{r}
+train <- train %>%select(-visits)
+```
+
+## adContent 
+Some minor edits in a couple of variables as I looked at them and found some anomalies.
+```{r}
+train$adContent[train$adContent == 
+                  "{KeyWord:Google Brand Items}"] <- "Google Brand Items"
+train$adContent[train$adContent == 
+                "[Use default User-agent string] LIVRENPOCHE"] <- "LIVRENPOCHE"
+```
+
+## keyword
+keyword consits of a lot of information about the keywords that were used to find the web store. There could very valuable information about this but at the same time this is very raw and needs a lot of cleaning. We could use some Natural Language Processing techniques to draw insights from this varaible and apply it to out problem. Here's [my markdown for an NLP project](https://www.kaggle.com/code/sajjaddehnoei/keras-tidytest-tm-stringr-etc-in-r-0-79926). Agian, in a real world application I would definietly spend some more time on this field but for now I continue only with some cleaning and categorizing.  
+```{r}
+# some basic cleaning on keyword. 
+train <- train %>%
+  mutate(keyword = case_when(
+    str_detect(str_to_upper(keyword), "GOOGLE") ~ "google",
+    str_detect(str_to_upper(keyword), "YOUTUBE") ~ "youtube",
+    # there are more misspelling in the dataset that need to cleaned but for the 
+    # sake of this case, I would only change a few:
+    str_detect(str_to_upper(keyword), str_to_upper("goo.gl")) ~ "google",
+    str_detect(str_to_upper(keyword), str_to_upper("goggle")) ~ "google",
+    str_detect(str_to_upper(keyword), str_to_upper("youtoube")) ~ "youtube",
+    str_detect(str_to_upper(keyword), str_to_upper("youyrube")) ~ "youtube",
+    str_detect(str_to_upper(keyword), str_to_upper("youtubw")) ~ "youtube",
+    str_detect(str_to_upper(keyword), str_to_upper("you tebe")) ~ "youtube",
+    str_detect(str_to_upper(keyword), str_to_upper("youtb")) ~ "youtube",
+    str_detect(str_to_upper(keyword), str_to_upper("youybe")) ~ "youtube",
+    str_detect(str_to_upper(keyword), str_to_upper("you tube")) ~ "youtube",
+    str_detect(str_to_upper(keyword), str_to_upper("youtbu")) ~ "youtube",
+    str_detect(str_to_upper(keyword), str_to_upper("yout tube")) ~ "youtube",
+    str_detect(str_to_upper(keyword), str_to_upper("youtbu")) ~ "youtube",
+    str_detect(str_to_upper(keyword), str_to_upper("youtwo")) ~ "youtube",
+    str_detect(str_to_upper(keyword), str_to_upper("YOU TUBE")) ~ "youtube",
+    str_detect(str_to_upper(keyword), str_to_upper("You tube")) ~ "youtube",
+    str_detect(str_to_upper(keyword), str_to_upper("youttub")) ~ "youtube",
+    str_detect(str_to_upper(keyword), str_to_upper("yuo utube")) ~ "youtube",
+    str_detect(str_to_upper(keyword), str_to_upper("tou tube")) ~ "youtube",
+    str_detect(str_to_upper(keyword), str_to_upper("yoputube")) ~ "youtube",
+    str_detect(str_to_upper(keyword), str_to_upper("store")) ~ "youtube",
+    T ~ "Other"))
+```
+
+
+# Missing values
+We need to handle missing values before we start the analysis. Thefirst step here is to convert all missing values to `r NA`. This is to let R know that some of our text are quiavalant to missing. 
+## Unique Missing Code
+```{r unique code for NAs}
+train <- train %>% 
+  mutate_all(funs(ifelse(. %in% c("not available in demo dataset",
+                                   "(not provided)", "(not set)", "<NA>", 
+                                   "unknown.unknown",  "(none)",
+                                   "Not Socially Engaged") | is.na(.), NA, .)))
+```
+
+## Check for missing values in each column
+Now, let's look at all missing values in all columns. Table below represents the number and percentage of missing values in each column:
+```{r missing detection}
+nMiss <- function(x) {sum(is.na(x))}
+
+m <- as.data.frame(t(train %>% summarise_all(nMiss)))  %>%
+  rownames_to_column() %>%
+  rename(nMiss=V1, variable = rowname) %>%
+  mutate(pMiss = paste0(round(nMiss/nrow(train) * 100, 2),"%")) %>%
+  arrange(desc(nMiss))
+
+knitr::kable(m, col.names = c("Variable", "Number of Missing",
+                              "Percentage of Missing (%)"))
+```
+
+At this point, I remove any columns with all missing values as I don't have access to the source of data for this case study. In a real world project, I would do the following to fix the missingness in data:
+
++ First, it's always easiest to complete missingness. Contacting people and asking for more data.
++ Next, I would try a missing value treatment technique for columns that have important information in them.
++ Considering the nature of the problem and the large size of data I would probably look for stochastic approaches such as bootstrapping. But for now, let's just delete all columns with all missing values.
+
+Our train dataset initially had `r ncol(train)` columns. 
+```{r}
+train <- train %>% 
+  select(m$variable[m$nMiss != 1])
+```
+After removing the columns that are entirely missing, now the dataset has `r ncol(train)` columns. 
+
+# Variable types
+Below I've made more changes to the database to represent the true type of variables. For example, a variable like campaign is coded as fator but a variable such as pageviews numeric is a more suitable type. 
+
+There are also multiple sources that have "google" or "youtube" in them, they're all changed to their complete name as well.
+```{r}
+train <- train %>%
+  mutate(adContent = as.factor(case_when(
+          str_detect(str_to_upper(adContent), "GOOGLE") ~ "google",
+          T ~ "Other")),
+         campaign = as.factor(campaign),
+         metro = as.factor(metro),
+         isTrueDirect = as.factor(if_else(is.na(isTrueDirect), 0, 1)),
+         city = as.factor(city),
+         region = as.factor(region),
+         bounces = as.factor(if_else(is.na(bounces), 0, 1)),
+         networkDomain = as.factor(networkDomain),
+         newVisits = as.factor(if_else(is.na(newVisits), 0, 1)),
+         medium = as.factor(medium),
+         operatingSystem = as.factor(operatingSystem),
+         continent = as.factor(continent),
+         subContinent = as.factor(subContinent),
+         country = as.factor(country),
+         pageviews = as.numeric(pageviews),
+         source = as.factor(case_when(
+           str_detect(str_to_upper(source), "YOUTUBE") ~ "youtube",
+           str_detect(str_to_upper(source), "GOOGLE") ~ "google",
+           str_detect(str_to_upper(source), "FACEBOOK") ~ "facebook",
+           str_detect(str_to_upper(source), "DUCKDUCKGO") ~ "duckduckgo",
+           str_detect(str_to_upper(source), "BING") ~ "bing",
+           T ~ "other")),
+         channelGrouping = as.factor(channelGrouping),
+         visitStartTime = as.POSIXct(visitStartTime, origin = '1970-01-01'),
+         isMobile = as.factor(isMobile),
+         deviceCategory = as.factor(deviceCategory),
+         hits = as.numeric(hits))
+```
+
+# Feature generation
+For further analysis, we need date to look at sales patterns, time series analysis, etc. So, here I've changed its format. I've also introduced month and week day to check for any patterns in them as well.
+
+## date
+Reading date values and creating month and weekDay. 
+```{r}
+# Adding date columns.
+train <- train %>%
+  mutate(date = as.Date(as.character(date), "%Y%m%d")) %>%
+  mutate(month = month(date, label = T), year = year(date), 
+         weekDay = weekdays(date))
+```
+
+## Time of the day
+I also created a new variable for when the visit was started (Morning, Evening, Night). This could be helpful to use in the model
+```{r}
+train <- train %>%
+  mutate(visitTimeOfDay = as.factor(case_when(
+    hour(visitStartTime) > 6 & hour(visitStartTime) <= 17 ~ "Morning",
+    hour(visitStartTime) > 17 & hour(visitStartTime) < 24 ~ "Evening",
+    T ~ "Night")))
+```
+
+# Medium
+NA values for medium are actually the direct traffic to the store so we need to rename them to "direct".
+```{r medium}
+train <- train %>%
+  mutate(medium = as.factor(if_else(is.na(medium), 
+                                    "direct", 
+                                    as.character(medium))))
+```
+
+
+<!--
+* Sajjad's quick peak at the dataset. This will not make the final markdown file.
+```{r, eval =F}
+train <- train %>% mutate(purchaseTrue = if_else(transactionRevenue == 0, F, T))
+table1(~. | purchaseTrue, data=train, overall=F, caption = "Table 1")
+```
+ -->
