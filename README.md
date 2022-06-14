@@ -1,7 +1,18 @@
 # Google Store Customer segmentation
-  *This is a case study prepared using [Kaggle Google Analytics Customer Reviews](https://www.kaggle.com/competitions/ga-customer-revenue-prediction/data) database.*
 
-# Project Description    
+## What is this?
+  *This is a case study prepared using [Kaggle Google Analytics Customer Reviews](https://www.kaggle.com/competitions/ga-customer-revenue-prediction/data) database.*
+## What I can find here?
+  This project show cases a variety of **data science** routine tasks on a dataset of nearly **1 million** records. Namely, you will find the following:
+   * Data cleaning, merging, transforming, pre-processing.
+   * Nesting/unnesting JSON queries.
+   * Missing value analysis.
+   * Various bar charts, scatterplots, etc.
+   * Variable selection using LASSO Regression.
+   * Customer clustering using K-means clustering.
+   * Time series analysis and sales forecast.
+    
+# Where I can find this?
 Here's the description of each file and folder in the project:
 
 * Analysis folder: This colder contains the data analysis markdown and html files. Each RMarkdonw file is knitted to an html document which shows the code chunks that are used in the analysis along with the explanations and visulations. Please feel free to re-run the .Rmd files if you want. All files should be run in a reasonable amount of time but the assessment.Rmd and customerProfiles.Rmd can be heavier as they have too many modeling and visulizations in them. Here are the files
