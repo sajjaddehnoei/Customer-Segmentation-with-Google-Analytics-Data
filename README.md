@@ -1,6 +1,5 @@
-# MLSEAnalysis
-
-  *This is a case study with [Kaggle Google Analytics Customer Reviews](https://www.kaggle.com/competitions/ga-customer-revenue-prediction/data) database.*
+# Google Store Customer segmentation
+  *This is a case study prepared using [Kaggle Google Analytics Customer Reviews](https://www.kaggle.com/competitions/ga-customer-revenue-prediction/data) database.*
 
 # Project Description    
 Here's the description of each file and folder in the project:
