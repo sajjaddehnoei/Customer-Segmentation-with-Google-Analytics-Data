@@ -1,6 +1,6 @@
 # MLSEAnalysis
 
-  *This is a case study as part of interview for MLSE business insight analyst.*
+  *This is a case study with [Kaggle Google Analytics Customer Reviews](https://www.kaggle.com/competitions/ga-customer-revenue-prediction/data) database.*
 
 # Project Description    
 Here's the description of each file and folder in the project:
