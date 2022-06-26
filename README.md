@@ -27,4 +27,4 @@ Here's the description of each file and folder in the project:
 * .gitignore: files that are to be ignored when version controling using github.
 * caseStudy.html: the description of the case as received from the team and found on kaggle.
 
-## You can visit the anlysis file from this link: https://htmlpreview.github.io/?https://github.com/https://github.com/sajjaddehnoei/Customer-Segmentation-with-Google-Analytics-Data/blob/main/Analysis/consumerProfiles.html
+## You can visit the anlysis file from this link: https://htmlpreview.github.io/https://github.com/https://github.com/sajjaddehnoei/Customer-Segmentation-with-Google-Analytics-Data/blob/main/Analysis/consumerProfiles.html
